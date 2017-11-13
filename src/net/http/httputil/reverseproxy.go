@@ -59,6 +59,10 @@ type ReverseProxy struct {
 	// modifies the Response from the backend.
 	// If it returns an error, the proxy returns a StatusBadGateway error.
 	ModifyResponse func(*http.Response) error
+
+	// ErrorHandler is an optional function that handle the error when
+	// RoundTrip return an error
+	ErrorHandler func(http.ResponseWriter, *http.Request, error)
 }
 
 // A BufferPool is an interface for getting and returning temporary
@@ -191,6 +195,11 @@ func (p *ReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	res, err := transport.RoundTrip(outreq)
+	if err != nil && p.ErrorHandler != nil {
+		p.logf("http: proxy error: %v", err)
+		p.ErrorHandler(rw, outreq, err)
+		return
+	}
 	if res == nil {
 		res = &http.Response{
 			StatusCode: http.StatusBadGateway,

@@ -660,6 +660,44 @@ func TestReverseProxyModifyResponse_OnError(t *testing.T) {
 	resp.Body.Close()
 }
 
+func TestReverseProxyErrorHandler(t *testing.T) {
+	// Wrong url to generate an error
+	// Always returns an error
+	errBackend := httptest.NewUnstartedServer(nil)
+	errBackend.Config.ErrorLog = log.New(ioutil.Discard, "", 0) // quiet for tests
+	defer errBackend.Close()
+
+	rpURL, _ := url.Parse(errBackend.URL)
+
+	tests := []struct {
+		wantCode     int
+		errorHandler func(http.ResponseWriter, *http.Request, error)
+	}{
+		{wantCode: http.StatusBadGateway},
+		{wantCode: http.StatusTeapot, errorHandler: func(rw http.ResponseWriter, req *http.Request, err error) { rw.WriteHeader(http.StatusTeapot) }},
+	}
+
+	for i, tt := range tests {
+		rproxy := NewSingleHostReverseProxy(rpURL)
+		rproxy.ErrorLog = log.New(ioutil.Discard, "", 0) // quiet for tests
+		if tt.errorHandler != nil {
+			rproxy.ErrorHandler = tt.errorHandler
+		}
+
+		frontendProxy := httptest.NewServer(rproxy)
+		defer frontendProxy.Close()
+
+		resp, err := http.Get(frontendProxy.URL + "/test")
+		if err != nil {
+			t.Fatalf("failed to reach proxy: %v", err)
+		}
+		if g, e := resp.StatusCode, tt.wantCode; g != e {
+			t.Errorf("#%d: got res.StatusCode %d; expected %d", i, g, e)
+		}
+		resp.Body.Close()
+	}
+}
+
 // Issue 16659: log errors from short read
 func TestReverseProxy_CopyBuffer(t *testing.T) {
 	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
